@@ -78,9 +78,9 @@ class OLEDService():
         # Display cycle settings
         self.cycle_enabled = True
         self.cycle_interval = 60  # Show cycle every 60 seconds
-        self.last_cycle_time = 0
+        self.last_cycle_time = time.time()  # Initialize to current time
         self.cycle_state = 0  # 0=logo, 1=greeting, 2=server_info, 3=info
-        self.cycle_state_start_time = 0
+        self.cycle_state_start_time = time.time()  # Initialize to current time
         self.greeting_duration = 3      # Show greeting for 3 sec
         self.server_info_duration = 5   # Show server info for 5 sec  
         self.info_duration = 8          # Show system info for 8 sec
