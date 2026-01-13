@@ -407,9 +407,8 @@ class OLEDService():
 
             # Main display logic
             if self.wake_flag:
-                # Check if video mode is active and enabled
+                # VIDEO INTRO MODE - Only play video, show info every 5 minutes
                 if self.current_page == OLEDPage.VIDEO_INTRO and self.video_enabled and self.video_frames is not None:
-                    # Check if it's time to show device info (every info_display_interval seconds)
                     time_since_last_info = current_time - self.last_info_display_time
                     
                     if self.showing_info:
@@ -418,27 +417,26 @@ class OLEDService():
                             # Return to video
                             self.showing_info = False
                             self.last_info_display_time = current_time
+                            self.video_frame_index = 0  # Reset video to beginning
                             self.log.debug("Returning to video intro")
                         else:
-                            # Continue showing info pages
-                            if last_page_index != page_index or current_time - last_refresh_time > INTERVAL:
-                                last_page_index = page_index
+                            # Show the performance page (info)
+                            if current_time - last_refresh_time > INTERVAL:
                                 last_refresh_time = current_time
-                                page[page_index](self.oled)
+                                page[0](self.oled)  # Always show performance page
                     elif time_since_last_info >= self.info_display_interval:
                         # Time to show device info
                         self.showing_info = True
                         self.info_display_start_time = current_time
-                        page_index = 0
-                        last_page_index = -1
                         self.log.debug("Showing device info")
                     else:
-                        # Play video
+                        # Play video frames
                         if current_time - last_frame_time >= frame_interval:
                             self.draw_video_frame()
                             last_frame_time = current_time
-                else:
-                    # Standard info pages mode
+                
+                # STANDARD INFO MODE - cycle through pages normally
+                elif self.current_page == OLEDPage.ALL_INFO:
                     if last_page_index != page_index or current_time - last_refresh_time > INTERVAL:
                         last_page_index = page_index
                         last_refresh_time = current_time
