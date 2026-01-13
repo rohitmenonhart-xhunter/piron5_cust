@@ -77,7 +77,7 @@ class OLEDService():
         
         # Display cycle settings
         self.cycle_enabled = True
-        self.cycle_interval = 60  # Show cycle every 60 seconds
+        self.cycle_interval = 120  # Show logo for 2 minutes before switching
         self.last_cycle_time = time.time()  # Initialize to current time
         self.cycle_state = 0  # 0=logo, 1=greeting, 2=server_info, 3=info
         self.cycle_state_start_time = time.time()  # Initialize to current time
@@ -403,64 +403,50 @@ class OLEDService():
                 time.sleep(0.1)
                 continue
 
-            # ===== DISPLAY CYCLE LOGIC =====
-            time_since_cycle = current_time - self.last_cycle_time
+            # ===== SIMPLE DISPLAY CYCLE =====
+            # State 0: LOGO (2 minutes)
+            # State 1: FALCON 1 text (5 seconds)
+            
             time_in_state = current_time - self.cycle_state_start_time
 
-            # State 0: LOGO (showing most of the time)
             if self.cycle_state == 0:
+                # Show logo
                 if not logo_drawn:
                     if self.logo_frame is not None:
                         self.draw_logo()
+                        self.log.info("Displaying logo")
                     else:
-                        # Fallback: show text logo
+                        # Fallback: show server name as text
                         self.oled.clear()
                         self.oled.draw_text(self.server_name, 64, 25, align='center', size=16)
                         self.oled.display()
+                        self.log.info("Displaying text logo (no image)")
                     logo_drawn = True
                 
-                # Check if it's time to start the cycle
-                if time_since_cycle >= self.cycle_interval:
+                # After 2 minutes, show Falcon 1 text
+                if time_in_state >= self.cycle_interval:
                     self.cycle_state = 1
                     self.cycle_state_start_time = current_time
                     logo_drawn = False
-                    self.log.debug("Starting display cycle: Greeting")
+                    self.log.debug("Switching to Falcon 1 text")
 
-            # State 1: GREETING
             elif self.cycle_state == 1:
-                if time_in_state < 0.1:  # Draw once at start
-                    self.draw_greeting()
+                # Show FALCON 1 text
+                if not logo_drawn:
+                    self.oled.clear()
+                    self.oled.draw.rectangle((0, 0, 127, 63), outline=1, fill=0)
+                    self.oled.draw_text("★ FALCON 1 ★", 64, 15, align='center', size=12)
+                    self.oled.draw_text("by HITROO", 64, 35, align='center', size=10)
+                    self.oled.draw_text("━━━━━━━━━━", 64, 50, align='center', size=8)
+                    self.oled.display()
+                    logo_drawn = True
                 
-                if time_in_state >= self.greeting_duration:
-                    self.cycle_state = 2
-                    self.cycle_state_start_time = current_time
-                    self.log.debug("Display cycle: Server Info")
-
-            # State 2: SERVER INFO
-            elif self.cycle_state == 2:
-                if time_in_state < 0.1:  # Draw once at start
-                    self.draw_server_info()
-                
-                if time_in_state >= self.server_info_duration:
-                    self.cycle_state = 3
-                    self.cycle_state_start_time = current_time
-                    page_index = 0
-                    self.log.debug("Display cycle: System Info")
-
-            # State 3: SYSTEM INFO
-            elif self.cycle_state == 3:
-                # Refresh info page periodically
-                if current_time - last_refresh_time > INTERVAL:
-                    last_refresh_time = current_time
-                    info_pages[page_index](self.oled)
-                
-                if time_in_state >= self.info_duration:
-                    # Cycle complete, return to logo
+                # After 5 seconds, back to logo
+                if time_in_state >= 5:
                     self.cycle_state = 0
-                    self.last_cycle_time = current_time
                     self.cycle_state_start_time = current_time
                     logo_drawn = False
-                    self.log.debug("Display cycle complete, returning to logo")
+                    self.log.debug("Returning to logo")
 
             # Sleep timeout
             if self.sleep_timeout > 0 and current_time - self.wake_start_time > self.sleep_timeout:
