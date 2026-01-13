@@ -37,7 +37,10 @@ OLED_DEFAULT_CONFIG = {
 class OLEDPage(Enum):
     POWER_OFF = 0
     ALL_INFO = 1
-    VIDEO_INTRO = 2
+    LOGO = 2           # Still logo image
+    GREETING = 3       # Welcome greeting
+    SERVER_INFO = 4    # Custom server message
+    CYCLE_INFO = 5     # System info in cycle
 
 class OLEDService():
     @log_error
@@ -70,22 +73,26 @@ class OLEDService():
 
         self.running = False
         self.thread = None
-        self.current_page = OLEDPage.ALL_INFO
+        self.current_page = OLEDPage.LOGO
         
-        # Video intro settings
-        self.video_enabled = OLED_DEFAULT_CONFIG['video_enabled']
-        self.video_fps = OLED_DEFAULT_CONFIG['video_fps']
-        self.info_display_interval = OLED_DEFAULT_CONFIG['info_display_interval']
-        self.info_display_duration = OLED_DEFAULT_CONFIG['info_display_duration']
-        self.video_frames = None
-        self.video_frame_count = 0
-        self.video_frame_index = 0
-        self.last_info_display_time = 0
-        self.showing_info = False
-        self.info_display_start_time = 0
+        # Display cycle settings
+        self.cycle_enabled = True
+        self.cycle_interval = 60  # Show cycle every 60 seconds
+        self.last_cycle_time = 0
+        self.cycle_state = 0  # 0=logo, 1=greeting, 2=server_info, 3=info
+        self.cycle_state_start_time = 0
+        self.greeting_duration = 3      # Show greeting for 3 sec
+        self.server_info_duration = 5   # Show server info for 5 sec  
+        self.info_duration = 8          # Show system info for 8 sec
         
-        # Load video frames
-        self._load_video_frames(config.get('video_frames_path'))
+        # Custom messages
+        self.server_name = "FALCON 1"
+        self.server_owner = "HITROO"
+        self.server_description = "Private Server for Lightscape"
+        
+        # Logo frame
+        self.logo_frame = None
+        self._load_logo_frame(config.get('video_frames_path'))
         
         self.update_config(config)
 
@@ -94,11 +101,10 @@ class OLEDService():
         self.log.setLevel(level)
 
     @log_error
-    def _load_video_frames(self, frames_path=None):
-        """Load preprocessed video frames from .npz file."""
+    def _load_logo_frame(self, frames_path=None):
+        """Load the first frame from preprocessed video as a still logo."""
         # Try to find frames file
         if frames_path is None:
-            # Try default locations
             package_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             possible_paths = [
                 os.path.join(package_dir, 'video_frames.npz'),
@@ -110,21 +116,19 @@ class OLEDService():
                     break
         
         if frames_path is None or not os.path.exists(frames_path):
-            self.log.warning("No video frames file found, video intro disabled")
-            self.video_enabled = False
+            self.log.warning("No logo frames file found")
             return
         
         try:
             data = np.load(frames_path)
-            self.video_frames = data['frames']  # Shape: (num_frames, 64, 128)
-            self.video_fps = float(data.get('fps', 15))
-            self.video_frame_count = len(self.video_frames)
-            self.log.info(f"Loaded {self.video_frame_count} video frames from {frames_path}")
-            self.current_page = OLEDPage.VIDEO_INTRO
-            self.last_info_display_time = time.time()
+            frames = data['frames']
+            # Use the first frame as the logo
+            self.logo_frame = frames[0]  # Shape: (64, 128) boolean
+            self.log.info(f"Loaded logo frame from {frames_path}")
+            self.current_page = OLEDPage.LOGO
+            self.last_cycle_time = time.time()
         except Exception as e:
-            self.log.error(f"Failed to load video frames: {e}")
-            self.video_enabled = False
+            self.log.error(f"Failed to load logo frame: {e}")
 
     @log_error
     def update_config(self, config):
@@ -315,27 +319,45 @@ class OLEDService():
         self.oled.display()
 
     @log_error
-    def draw_video_frame(self):
-        """Draw the current video frame to the OLED."""
-        if self.video_frames is None or self.video_frame_count == 0:
+    def draw_logo(self):
+        """Draw the still logo image."""
+        if self.logo_frame is None:
             return False
         
-        # Get current frame data (boolean array)
-        frame_data = self.video_frames[self.video_frame_index]
-        
         # Convert numpy boolean array to PIL Image
-        # Multiply by 255 to get white pixels where True
-        frame_array = (frame_data * 255).astype(np.uint8)
+        frame_array = (self.logo_frame * 255).astype(np.uint8)
         frame_image = Image.fromarray(frame_array, mode='L')
         frame_image = frame_image.convert('1')
         
-        # Set the image to the OLED buffer
         self.oled.image = frame_image
         self.oled.display()
-        
-        # Advance to next frame (loop)
-        self.video_frame_index = (self.video_frame_index + 1) % self.video_frame_count
         return True
+
+    @log_error
+    def draw_greeting(self):
+        """Draw a welcome greeting with animation effect."""
+        self.oled.clear()
+        # Greeting text with stars
+        self.oled.draw_text("★ WELCOME ★", 64, 10, align='center', size=12)
+        self.oled.draw_text("to", 64, 28, align='center', size=8)
+        self.oled.draw_text(self.server_name, 64, 40, align='center', size=14)
+        self.oled.display()
+
+    @log_error
+    def draw_server_info(self):
+        """Draw custom server information."""
+        self.oled.clear()
+        # Server name with box
+        self.oled.draw.rectangle((0, 0, 127, 14), outline=1, fill=1)
+        self.oled.draw_text(self.server_name, 64, 2, fill=0, align='center', size=10)
+        # Owner info
+        self.oled.draw_text(f"by {self.server_owner}", 64, 20, align='center', size=10)
+        # Description with line
+        self.oled.draw.line((10, 35, 117, 35), fill=1)
+        self.oled.draw_text(self.server_description, 64, 42, align='center', size=8)
+        # Footer
+        self.oled.draw_text("━━━━━━━━━━━━━━━", 64, 55, align='center', size=6)
+        self.oled.display()
 
     @log_error
     def loop(self):
@@ -343,117 +365,109 @@ class OLEDService():
         from ..oled_page.disk import oled_page_disk
         from ..oled_page.performance import oled_page_performance
 
-        page = [
-            oled_page_performance,
-            oled_page_ips,
-            oled_page_disk,
-            ]
-    
+        info_pages = [oled_page_performance, oled_page_ips, oled_page_disk]
         page_index = 0
-        last_page_index = -1
         last_refresh_time = 0
-        last_frame_time = 0
-        frame_interval = 1.0 / self.video_fps if self.video_fps > 0 else 0.067  # ~15 FPS default
+        logo_drawn = False
 
         if self.oled is None or not self.oled.is_ready():
             self.log.error("OLED service not ready")
             return
 
-        self.log.info(f"OLED loop started. Video enabled: {self.video_enabled}, Frame count: {self.video_frame_count}")
+        self.log.info(f"OLED display cycle started. Logo loaded: {self.logo_frame is not None}")
+        self.last_cycle_time = time.time()
 
         while self.running:
             current_time = time.time()
 
-            # Handle button presses (always active)
+            # Handle button presses
             if self.button == 'single_click':
                 if not self.wake_flag:
-                    self.log.info("OLED service waking up")
                     self.wake_flag = True
-                    last_page_index = -1
                 else:
-                    # Manual page switch - temporarily show info pages
-                    if self.current_page == OLEDPage.VIDEO_INTRO:
-                        self.current_page = OLEDPage.ALL_INFO
-                        page_index = 0
-                    else:
-                        page_index += 1
-                        if page_index >= len(page):
-                            page_index = 0
-                            # Return to video after cycling through all pages
-                            if self.video_enabled and self.video_frames is not None:
-                                self.current_page = OLEDPage.VIDEO_INTRO
+                    # Manual cycle through info pages
+                    page_index = (page_index + 1) % len(info_pages)
+                    info_pages[page_index](self.oled)
                 self.button = False
                 self.wake_start_time = current_time
-            elif self.button == 'double_click':
-                if self.wake_flag:
-                    page_index -= 1
-                    if page_index < 0:
-                        page_index = len(page) - 1
-                    self.wake_start_time = current_time
-                self.button = False
-            elif self.button == 'long_press_2s_released':
-                # Toggle between video and info mode
-                if self.current_page == OLEDPage.VIDEO_INTRO:
-                    self.current_page = OLEDPage.ALL_INFO
-                elif self.video_enabled and self.video_frames is not None:
-                    self.current_page = OLEDPage.VIDEO_INTRO
+            elif self.button:
                 self.button = False
 
-            # Handle power off state
+            # Handle power off
             if self.current_page == OLEDPage.POWER_OFF:
                 self.draw_power_off()
                 time.sleep(0.1)
                 continue
 
-            # Main display logic
-            if self.wake_flag:
-                # VIDEO INTRO MODE - Only play video, show info every 5 minutes
-                if self.current_page == OLEDPage.VIDEO_INTRO and self.video_enabled and self.video_frames is not None:
-                    time_since_last_info = current_time - self.last_info_display_time
-                    
-                    if self.showing_info:
-                        # Currently showing info - check if duration has elapsed
-                        if current_time - self.info_display_start_time >= self.info_display_duration:
-                            # Return to video
-                            self.showing_info = False
-                            self.last_info_display_time = current_time
-                            self.video_frame_index = 0  # Reset video to beginning
-                            self.log.debug("Returning to video intro")
-                        else:
-                            # Show the performance page (info)
-                            if current_time - last_refresh_time > INTERVAL:
-                                last_refresh_time = current_time
-                                page[0](self.oled)  # Always show performance page
-                    elif time_since_last_info >= self.info_display_interval:
-                        # Time to show device info
-                        self.showing_info = True
-                        self.info_display_start_time = current_time
-                        self.log.debug("Showing device info")
+            if not self.wake_flag:
+                time.sleep(0.1)
+                continue
+
+            # ===== DISPLAY CYCLE LOGIC =====
+            time_since_cycle = current_time - self.last_cycle_time
+            time_in_state = current_time - self.cycle_state_start_time
+
+            # State 0: LOGO (showing most of the time)
+            if self.cycle_state == 0:
+                if not logo_drawn:
+                    if self.logo_frame is not None:
+                        self.draw_logo()
                     else:
-                        # Play video frames
-                        if current_time - last_frame_time >= frame_interval:
-                            self.draw_video_frame()
-                            last_frame_time = current_time
+                        # Fallback: show text logo
+                        self.oled.clear()
+                        self.oled.draw_text(self.server_name, 64, 25, align='center', size=16)
+                        self.oled.display()
+                    logo_drawn = True
                 
-                # STANDARD INFO MODE - cycle through pages normally
-                elif self.current_page == OLEDPage.ALL_INFO:
-                    if last_page_index != page_index or current_time - last_refresh_time > INTERVAL:
-                        last_page_index = page_index
-                        last_refresh_time = current_time
-                        page[page_index](self.oled)
+                # Check if it's time to start the cycle
+                if time_since_cycle >= self.cycle_interval:
+                    self.cycle_state = 1
+                    self.cycle_state_start_time = current_time
+                    logo_drawn = False
+                    self.log.debug("Starting display cycle: Greeting")
 
-                # Sleep timeout
-                if self.sleep_timeout > 0 and current_time - self.wake_start_time > self.sleep_timeout:
-                    self.log.info("OLED sleep timeout, sleeping")
-                    self.sleep()
-                    continue
+            # State 1: GREETING
+            elif self.cycle_state == 1:
+                if time_in_state < 0.1:  # Draw once at start
+                    self.draw_greeting()
+                
+                if time_in_state >= self.greeting_duration:
+                    self.cycle_state = 2
+                    self.cycle_state_start_time = current_time
+                    self.log.debug("Display cycle: Server Info")
 
-            # Small sleep to prevent busy-looping
-            # Use shorter sleep for video playback to maintain FPS
-            if self.current_page == OLEDPage.VIDEO_INTRO and not self.showing_info:
-                time.sleep(0.01)  # 10ms for smooth video
-            else:
-                time.sleep(0.05)  # 50ms for info pages
+            # State 2: SERVER INFO
+            elif self.cycle_state == 2:
+                if time_in_state < 0.1:  # Draw once at start
+                    self.draw_server_info()
+                
+                if time_in_state >= self.server_info_duration:
+                    self.cycle_state = 3
+                    self.cycle_state_start_time = current_time
+                    page_index = 0
+                    self.log.debug("Display cycle: System Info")
+
+            # State 3: SYSTEM INFO
+            elif self.cycle_state == 3:
+                # Refresh info page periodically
+                if current_time - last_refresh_time > INTERVAL:
+                    last_refresh_time = current_time
+                    info_pages[page_index](self.oled)
+                
+                if time_in_state >= self.info_duration:
+                    # Cycle complete, return to logo
+                    self.cycle_state = 0
+                    self.last_cycle_time = current_time
+                    self.cycle_state_start_time = current_time
+                    logo_drawn = False
+                    self.log.debug("Display cycle complete, returning to logo")
+
+            # Sleep timeout
+            if self.sleep_timeout > 0 and current_time - self.wake_start_time > self.sleep_timeout:
+                self.sleep()
+                continue
+
+            time.sleep(0.1)
 
     @log_error
     def start(self):
